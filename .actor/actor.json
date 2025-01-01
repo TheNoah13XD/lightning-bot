@@ -1,0 +1,12 @@
+{
+	"actorSpecification": 1,
+	"name": "Lightning Bot",
+	"title": "Lightning Bot",
+	"description": "Scrape Emails form Linktr.ee pages.",
+	"version": "0.1",
+	"meta": {
+		"templateId": "ts-crawlee-playwright-chrome"
+	},
+	"input": "./input_schema.json",
+	"dockerfile": "./Dockerfile"
+}
