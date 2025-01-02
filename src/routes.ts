@@ -167,7 +167,6 @@ const handlePlatform = async (platform: string, page: Page, url: string, log: an
             await Dataset.pushData({ email, url });
         }
     } else {
-        console.log(`Extracting ${platform} username from ${url}`);
         const username = extractUsernames([{ url }], platform.toLowerCase())[0];
 
         if (!username) {
@@ -175,7 +174,7 @@ const handlePlatform = async (platform: string, page: Page, url: string, log: an
             return;
         }
 
-        const result = await fetchSocialMediaData(platform.toLowerCase(), { usernames: [username], resultsLimit: 1 });
+        const result = platform === 'Instagram' ? await fetchSocialMediaData('instagram', { usernames: [username], resultsLimit: 1 }) : await fetchSocialMediaData('tiktok', { profiles: [username], resultsPerPage: 1 });
         const biography = platform === 'Instagram' ? result[0]?.biography : (result[0] as any).authorMeta.signature;
         const emails = Array.from(extractEmails(biography));
 
