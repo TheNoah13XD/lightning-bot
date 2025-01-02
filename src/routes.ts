@@ -167,6 +167,7 @@ const handlePlatform = async (platform: string, page: Page, url: string, log: an
             await Dataset.pushData({ email, url });
         }
     } else {
+        console.log(`Extracting ${platform} username from ${url}`);
         const username = extractUsernames([{ url }], platform.toLowerCase())[0];
 
         if (!username) {
@@ -196,7 +197,7 @@ const handlePlatform = async (platform: string, page: Page, url: string, log: an
 };
 
 router.addDefaultHandler(async ({ request, page, log }) => {
-    const url = request.loadedUrl;
+    const url = request.url;
     let platform = '';
 
     if (/^https?:\/\/(www\.)?linktr\.ee/.test(url)) {
