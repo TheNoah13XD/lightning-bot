@@ -78,12 +78,12 @@ const extractUsernames = (uniqueSocialLinks: any[], platform: string) => {
     }, [] as string[]);
 };
 
-const expandYouTubeShortLink = async (shortUrl: string) => {
-    const response = await fetch(shortUrl, { redirect: 'follow' });
-    return response.url;
+const expandYouTubeShortLinks = async (shortUrls: string[]) => {
+    const responses = await Promise.all(shortUrls.map(shortUrl => fetch(shortUrl, { redirect: 'follow' })));
+    return responses.map(response => response.url);
 };
 
-const fetchSocialMediaData = async (platform: string, input: any) => {
+const fetchSocialMediaData = async (platform: string, inputs: any[]) => {
     const actorMap: { [key: string]: string } = {
         instagram: "apify/instagram-profile-scraper",
         tiktok: "clockworks/tiktok-profile-scraper",
@@ -96,9 +96,9 @@ const fetchSocialMediaData = async (platform: string, input: any) => {
     }
 
     try {
-        const run = await client.actor(actorMap[platform]).call(input);
-        const { items } = await client.dataset(run.defaultDatasetId).listItems();
-        return items;
+        const runs = await Promise.all(inputs.map(input => client.actor(actorMap[platform]).call(input)));
+        const items = await Promise.all(runs.map(run => client.dataset(run.defaultDatasetId).listItems()));
+        return items.flatMap(item => item.items);
     } catch (error) {
         console.error(`Failed to fetch data for platform ${platform}:`, error);
         throw new Error(`Failed to fetch data for platform ${platform}`);
@@ -125,23 +125,29 @@ const crawlLinktree = async (page: Page, url: string) => {
 
     const socialLinks = separateLinks(combinedLinks);
 
-    const [instagramUsernames, tiktokUsernames] = [
-        extractUsernames(socialLinks, 'instagram'),
-        extractUsernames(socialLinks, 'tiktok')
-    ];
+    const usernameCache: { [key: string]: string[] } = {};
+    const getUsernames = (platform: string) => {
+        if (!usernameCache[platform]) {
+            usernameCache[platform] = extractUsernames(socialLinks, platform);
+        }
+        return usernameCache[platform];
+    };
+
+    const instagramUsernames = getUsernames('instagram');
+    const tiktokUsernames = getUsernames('tiktok');
 
     const twitterUrls = socialLinks.filter(link => link && link.url && (link.url.includes('x.com') || link.url.includes('twitter.com'))).map(link => link.url);
     const twitterStartUrls = twitterUrls.map(url => Array(5).fill(url)).flat();
 
     const youtubeUrls = socialLinks.filter(link => link && link.url && (link.url.includes('youtube') || link.url.includes('youtu.be'))).map(link => link.url);
-    const expandedYouTubeUrls = await Promise.all(youtubeUrls.map(url => url.includes('youtu.be') ? expandYouTubeShortLink(url) : url));
-    const youtubeStartUrls = expandedYouTubeUrls.map(url => ({ url, method: 'GET' }));
+    const expandedYouTubeUrls = await expandYouTubeShortLinks(youtubeUrls.filter(url => url.includes('youtu.be')));
+    const youtubeStartUrls = [...youtubeUrls.filter(url => !url.includes('youtu.be')), ...expandedYouTubeUrls].map(url => ({ url, method: 'GET' }));
 
     const [instagramResult, tiktokResult, twitterResult, youtubeResult] = await Promise.all([
-        instagramUsernames.length ? fetchSocialMediaData('instagram', { usernames: instagramUsernames, resultsLimit: 1 }) : [],
-        tiktokUsernames.length ? fetchSocialMediaData('tiktok', { profiles: tiktokUsernames, resultsPerPage: 1 }) : [],
-        twitterStartUrls.length ? fetchSocialMediaData('twitter', { startUrls: twitterStartUrls, getFollowers: false, getFollowing: false, getRetweeters: false }) : [],
-        youtubeStartUrls.length ? fetchSocialMediaData('youtube', { startUrls: youtubeStartUrls, maxResults: 1, maxResultStreams: 0, maxResultsShorts: 0 }) : [],
+        instagramUsernames.length ? fetchSocialMediaData('instagram', instagramUsernames.map(username => ({ usernames: [username], resultsLimit: 1 }))) : [],
+        tiktokUsernames.length ? fetchSocialMediaData('tiktok', tiktokUsernames.map(profile => ({ profiles: [profile], resultsPerPage: 1 }))) : [],
+        twitterStartUrls.length ? fetchSocialMediaData('twitter', twitterStartUrls.map(url => ({ startUrls: [url], getFollowers: false, getFollowing: false, getRetweeters: false }))) : [],
+        youtubeStartUrls.length ? fetchSocialMediaData('youtube', youtubeStartUrls.map(url => ({ startUrls: [url], maxResults: 1, maxResultStreams: 0, maxResultsShorts: 0 }))) : [],
     ]);
 
     const instagramEmails = Array.from(extractEmails(instagramResult[0]?.biography as string));
@@ -174,7 +180,7 @@ const handlePlatform = async (platform: string, page: Page, url: string, log: an
             return;
         }
 
-        const result = platform === 'Instagram' ? await fetchSocialMediaData('instagram', { usernames: [username], resultsLimit: 1 }) : await fetchSocialMediaData('tiktok', { profiles: [username], resultsPerPage: 1 });
+        const result = platform === 'Instagram' ? await fetchSocialMediaData('instagram', [{ usernames: [username], resultsLimit: 1 }]) : await fetchSocialMediaData('tiktok', [{ profiles: [username], resultsPerPage: 1 }]);
         const biography = platform === 'Instagram' ? result[0]?.biography : (result[0] as any).authorMeta.signature;
         const emails = Array.from(extractEmails(biography));
 
