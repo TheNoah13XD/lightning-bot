@@ -121,8 +121,11 @@ const crawlLinktree = async (page: Page, url: string) => {
     const { socialIcons, links, emailsFromContent } = await extractProfileData(page);
 
     const emails: Set<string> = new Set(emailsFromContent);
-    const combinedLinks = combineAndFilterLinks(socialIcons, links, emails);
+    if (emails.size > 0) {
+        return Array.from(emails).map(email => ({ email, url }));
+    }
 
+    const combinedLinks = combineAndFilterLinks(socialIcons, links, emails);
     const socialLinks = separateLinks(combinedLinks);
 
     const usernameCache: { [key: string]: string[] } = {};
@@ -143,27 +146,39 @@ const crawlLinktree = async (page: Page, url: string) => {
     const expandedYouTubeUrls = await expandYouTubeShortLinks(youtubeUrls.filter(url => url.includes('youtu.be')));
     const youtubeStartUrls = [...youtubeUrls.filter(url => !url.includes('youtu.be')), ...expandedYouTubeUrls].map(url => ({ url, method: 'GET' }));
 
-    const [instagramResult, tiktokResult, twitterResult, youtubeResult] = await Promise.all([
-        instagramUsernames.length ? fetchSocialMediaData('instagram', instagramUsernames.map(username => ({ usernames: [username], resultsLimit: 1 }))) : [],
-        tiktokUsernames.length ? fetchSocialMediaData('tiktok', tiktokUsernames.map(profile => ({ profiles: [profile], resultsPerPage: 1 }))) : [],
-        twitterStartUrls.length ? fetchSocialMediaData('twitter', twitterStartUrls.map(url => ({ startUrls: [url], getFollowers: false, getFollowing: false, getRetweeters: false }))) : [],
-        youtubeStartUrls.length ? fetchSocialMediaData('youtube', youtubeStartUrls.map(url => ({ startUrls: [url], maxResults: 1, maxResultStreams: 0, maxResultsShorts: 0 }))) : [],
-    ]);
+    if (instagramUsernames.length) {
+        const instagramResult = await fetchSocialMediaData('instagram', instagramUsernames.map(username => ({ usernames: [username], resultsLimit: 1 })));
+        const instagramEmails = Array.from(extractEmails(instagramResult[0]?.biography as string));
+        if (instagramEmails.length > 0) {
+            return instagramEmails.map(email => ({ email, url: instagramResult[0]?.url }));
+        }
+    }
 
-    const instagramEmails = Array.from(extractEmails(instagramResult[0]?.biography as string));
-    const tiktokEmails = Array.from(extractEmails((tiktokResult[0] as any)?.authorMeta.signature as string));
-    const twitterEmails = Array.from(extractEmails(twitterResult[0]?.description as string));
-    const youtubeEmails = Array.from(extractEmails(youtubeResult[0]?.channelDescription as string));
+    if (tiktokUsernames.length) {
+        const tiktokResult = await fetchSocialMediaData('tiktok', tiktokUsernames.map(profile => ({ profiles: [profile], resultsPerPage: 1 })));
+        const tiktokEmails = Array.from(extractEmails((tiktokResult[0] as any)?.authorMeta.signature as string));
+        if (tiktokEmails.length > 0) {
+            return tiktokEmails.map(email => ({ email, url: (tiktokResult[0] as any)?.authorMeta.profileUrl }));
+        }
+    }
 
-    const emailUrlPairs = [
-        ...Array.from(emails).map(email => ({ email, url })),
-        ...instagramEmails.map(email => ({ email, url: instagramResult[0]?.url })),
-        ...tiktokEmails.map(email => ({ email, url: (tiktokResult[0] as any)?.authorMeta.profileUrl })),
-        ...twitterEmails.map(email => ({ email, url: twitterResult[0]?.url })),
-        ...youtubeEmails.map(email => ({ email, url: youtubeResult[0]?.channelUrl })),
-    ];
+    if (twitterStartUrls.length) {
+        const twitterResult = await fetchSocialMediaData('twitter', twitterStartUrls.map(url => ({ startUrls: [url], getFollowers: false, getFollowing: false, getRetweeters: false })));
+        const twitterEmails = Array.from(extractEmails(twitterResult[0]?.description as string));
+        if (twitterEmails.length > 0) {
+            return twitterEmails.map(email => ({ email, url: twitterResult[0]?.url }));
+        }
+    }
 
-    return emailUrlPairs;
+    if (youtubeStartUrls.length) {
+        const youtubeResult = await fetchSocialMediaData('youtube', youtubeStartUrls.map(url => ({ startUrls: [url], maxResults: 1, maxResultStreams: 0, maxResultsShorts: 0 })));
+        const youtubeEmails = Array.from(extractEmails(youtubeResult[0]?.channelDescription as string));
+        if (youtubeEmails.length > 0) {
+            return youtubeEmails.map(email => ({ email, url: youtubeResult[0]?.channelUrl }));
+        }
+    }
+
+    return [];
 }
 
 const handlePlatform = async (platform: string, page: Page, url: string, log: any) => {
@@ -183,6 +198,12 @@ const handlePlatform = async (platform: string, page: Page, url: string, log: an
         const result = platform === 'Instagram' ? await fetchSocialMediaData('instagram', [{ usernames: [username], resultsLimit: 1 }]) : await fetchSocialMediaData('tiktok', [{ profiles: [username], resultsPerPage: 1 }]);
         const biography = platform === 'Instagram' ? result[0]?.biography : (result[0] as any).authorMeta.signature;
         const emails = Array.from(extractEmails(biography));
+        if (emails.length > 0) {
+            for (const email of emails) {
+                await Dataset.pushData({ email, url: result[0]?.url });
+            }
+            return;
+        }
 
         const linktree = extractLinktree(biography);
         if (linktree.size) {
