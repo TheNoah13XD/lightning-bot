@@ -200,7 +200,7 @@ const handlePlatform = async (platform: string, page: Page, url: string, log: an
         const emails = Array.from(extractEmails(biography));
         if (emails.length > 0) {
             for (const email of emails) {
-                await Dataset.pushData({ email, url: result[0]?.url });
+                await Dataset.pushData({ email, url: platform === 'Instagram' ? result[0]?.url : (result[0] as any).authorMeta.profileUrl });
             }
             return;
         }
